@@ -1,3 +1,4 @@
+# Blink the LED on the Pico board
 # https://projects.raspberrypi.org/en/projects/getting-started-with-the-pico/5
 
 from machine import Pin, Timer
