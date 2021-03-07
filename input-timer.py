@@ -20,7 +20,7 @@ while True:
             tDelta = tNew - tOld # elapsed microseconds        
             print(tDelta)
             led.on()        # signal high input with LED
+            bOld = bNew         # remember this input level
+            tOld = tNew         # remember this counter value
         else:
             led.off()       # signal low input with LED
-        bOld = bNew         # remember this input level
-        tOld = tNew         # remember this counter value
