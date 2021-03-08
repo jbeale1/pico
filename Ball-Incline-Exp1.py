@@ -62,11 +62,5 @@ def waitA_p():              # wait only so long as A remains low
     while not inA.value():  # and return immediately if A is already high
         pass
 
-def waitB():           # wait for rising edge on input B
-  while inB.value():  # if inB is high, wait for it to go low
-      pass
-  while not inB.value():  # wait for it to go high
-      pass
-
 # ----------------------------------------------------------------
 main()
