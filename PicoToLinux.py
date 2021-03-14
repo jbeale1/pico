@@ -16,7 +16,7 @@ else:
     print("No Pico board found.")
     exit()
         
-ser = serial.Serial(port='/dev/'+devPico,baudrate=115200)
+ser = serial.Serial(port='/dev/'+devPico)
 
 while True:
   print(ser.readline().rstrip().decode('utf-8'))
