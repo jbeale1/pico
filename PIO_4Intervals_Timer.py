@@ -112,16 +112,18 @@ class pulsedelay:
             data.append(0xffffffff - self.sm.get() )
         return data
 
+# -----------------------------------------
 if __name__ == "__main__":
-    #from machine import Pin    
+
     import machine as m
-    import utime
     
     m.freq(250000000) # overclock to 250 MHz. Wheee!
     #m.freq(125000000) # standard clock speed
 
-    p1 = m.Pin(16,m.Pin.IN, m.Pin.PULL_UP) # Channel A input
-    # p2 = Pin(17,Pin.IN, Pin.PULL_UP) # Channel B input
+    # nominal timings from 1-PPS, 10% duty pulse
+    nomInt = (12500000, 125000000, 137500000, 250000000)
+    
+    p1 = m.Pin(16,m.Pin.IN, m.Pin.PULL_UP) # Channel A input    
     led1 = m.Pin(25, m.Pin.OUT)              # set pin 25 (driving onboard LED) to output
     led2 = m.Pin(22, m.Pin.OUT)              # set external output pin (driving offboard LED) to output
     led1.off()
@@ -134,7 +136,8 @@ if __name__ == "__main__":
         newVals = pulsein.read_blocking(4)  # get interval times
         i = 0
         for n in newVals:
-            print("%d" % n,end="")
+            delta = nomInt[i] - (n+i) # +i correction due to mov,push overhead
+            print("%d" % delta,end="")
             if i < 3:
                 i += 1
                 print(", ",end="")
@@ -142,3 +145,11 @@ if __name__ == "__main__":
         led1.toggle()
 
 # Note: Timer Period = 2/(250 MHz) so time in microseconds = newVal / (125) 
+
+# Sample output with 1-PPS 10% duty cycle input:
+# -1, 3, 1, 5
+# -1, 3, 1, 6
+# -1, 3, 2, 6
+# -1, 3, 2, 6
+# -1, 3, 1, 6
+# -1, 3, 2, 6
