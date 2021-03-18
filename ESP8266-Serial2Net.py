@@ -1,24 +1,67 @@
-# Serial UART Rx to Net Socket data Tx, J.Beale March 16 2021
-# ESP8266 receives data on UART and sends out via Wifi
-# as network client, and expects remote server to be listening already.
-#  (for example running 'nc -l <port>' on remote host)
+# ESP8266 Receives data on UART, and sends out via Wifi (network socket)
+# as client. This presumes the remote server is listening already on the socket.
+#  (eg. 'nc -l <port>' on remote host, but soon quits if output redirected?)
 # See: stackoverflow.com/questions/21233340/sending-string-via-socket-python
+#  J.Beale March 18 2021
 
 import machine        # hardware pins
 import socket, errno  # NTP via wifi
 import time      # RTC time/date stamp
 import utime     # msec() and usec()
 import uerrno    # list of symbolic OSError codes
-import ntptime   # get current time of day
+#import ntptime   # stock version fixed to pool.ntp.org
 import uos       # disable REPL on uart
 import network   # check on network status
 
 # ----------------------------------------------------------------------
-server = '192.168.1.105'  # remote server to send data (rp49.local)
-port = 8889               # network port to communicate through
+server = '192.168.1.105'    # remote server to send data (rp49.local)
+port = 8889                 # network port to communicate through
+NTP_host = '192.168.1.212'  # local NTP server with fixed IP address
 
 led = machine.Pin(2, machine.Pin.OUT)  # onboard LED
 # ----------------------------------------------------------------------
+
+# Modified version of ntptime.py to use local NTP server
+# https://github.com/micropython/micropython-infineon/blob/master/esp8266/scripts/ntptime.py
+try:
+    import ustruct as struct
+except:
+    import struct
+
+# (date(2000, 1, 1) - date(1900, 1, 1)).days * 24*60*60
+NTP_DELTA = 3155673600
+
+def NTP_time(nhost):
+    NTP_QUERY = bytearray(48)
+    NTP_QUERY[0] = 0x1b
+    #addr = socket.getaddrinfo(NTP_host, 123)[0][-1]
+    #print(addr) # DEBUG!!
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(1)
+    res = s.sendto(NTP_QUERY, (nhost, 123))
+    msg = s.recv(48)
+    s.close()
+    val = struct.unpack("!I", msg[40:44])[0]
+    return val - NTP_DELTA
+
+# --------------------------------------------------------
+
+# There's currently no timezone support in MicroPython, so
+# utime.localtime() will return UTC time (as if it was .gmtime())
+def NTP_settime(nhost):
+    t = NTP_time(nhost)
+    import machine
+    import utime
+    tm = utime.localtime(t)
+    tm = tm[0:3] + (0,) + tm[3:6] + (0,)
+    machine.RTC().datetime(tm)
+    #print(utime.localtime())
+# -------------------------------------------------------
+def vBlink(t):      # variable-length blink of duration t seconds
+     led.value(0)   # 0 means LED on
+     time.sleep(t)
+     led.value(1)
+     time.sleep(t)
 
 def shortBlink():
      led.value(0)   # 0 means LED on
@@ -75,8 +118,8 @@ def main():
  ts = getTS()
  #print("%s" % ts)
  #print("ESP8266-UART Receive to Network Socket starting")
-         
- #ntptime.settime()  # use network to set RTC to current time
+
+ NTP_settime(NTP_host)   # custom version set to my server 
  
  shortBlink()       # show NTP call returned
  ts = getTS()       # Date/Time string at program start
@@ -88,8 +131,7 @@ def main():
  try:
      stm = openNet()  # open network stream & send data 
      stm.send(("# Serial-Wifi Transfer v0.1 JPB 2021-03-17\n").encode())
-     stm.send(("%s  Y2K epoch: %d\n" % (ts,time.time())).encode())
-     # stm.send(("# Y2K epoch： %d\n" % time.time()).encode())
+     stm.send(("%s  Y2K epoch: %d\n" % (ts,time.time())).encode())     
      utime.sleep_ms(50) 
      shortBlink()       # show Network call returned    
      # stm.close()
@@ -100,16 +142,15 @@ def main():
      machine.reset()  # start over with hard reset
 # ----------------------------------------------------- 
  
- 
  # stm.close(); return   # ============  DEBUG  ============================
-  
-  
+    
  time.sleep(2)
  uos.dupterm(None, 1) # disable REPL on UART(0), allowing ext. input
  uart = machine.UART(0, rxbuf=64)                 
  uart.init(115200, timeout=100) # timeout in msec
 
  pktNumber = 0
+ shortBlink()       # show Network call returned    
 
  while True:    # overall main loop, alternating UART Rx & Net Tx
      
@@ -136,6 +177,8 @@ def main():
         utime.sleep_ms(15)        
         if (loopCnt > 20000):  # <== TIMEOUT sets max duration packet (20k = 5 minutes)
           stm.close()  # close the port and quit.
+          longBlink()
+          longBlink()
           utime.sleep(60)  # don't reboot too quickly
           machine.reset()  # hard reset, like Reset button
           break
@@ -155,6 +198,7 @@ def main():
 # ---------------------------------------------------------------------
 #   Done with UART, either error, timeout, or end of packet signal
 
+    vBlink(0.1)
     if (len(recLines) > 0):   # if there was any UART data received
      try:
       pktNumber += 1      
@@ -165,8 +209,7 @@ def main():
         outs1 = outs + '\n'  
         stm.send(outs1.encode())
       stm.send(("# END_PACKET %d\n" % pktNumber).encode())
-      shortBlink()
-      # utime.sleep_ms(20) 
+      vBlink(0.1)
       # stm.close()
 # -----------------------------------------------------       
               
@@ -185,4 +228,3 @@ def main():
 
 startNet()  # check we're online; wait if we aren't
 main()
-
