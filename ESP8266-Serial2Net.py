@@ -2,6 +2,9 @@
 # as client. This presumes a remote server is listening already on the socket.
 #  (eg. 'nc -l <port>' on remote host)
 # See: stackoverflow.com/questions/21233340/sending-string-via-socket-python
+
+# save this file as 'main.py' on ESP8266 FLASH device, eg. with Thonny
+# to automatically run at powerup or hard reset
 #  J.Beale March 18 2021
 
 import machine        # hardware pins
@@ -17,6 +20,8 @@ import network   # check on network status
 server = '192.168.1.105'    # LAN server to send data (rp49.local)
 port = 8889                 # network port to communicate through
 NTP_host = '192.168.1.212'  # local NTP server with fixed IP address
+
+VERSION = 'Serial-Wifi Transfer v0.2 JPB 2021-03-18'
 
 led = machine.Pin(2, machine.Pin.OUT)  # onboard LED
 # ----------------------------------------------------------------------
@@ -129,7 +134,7 @@ def main():
 # -----------------------------------------------------
  try:
      stm = openNet()  # open network stream & send data 
-     stm.send(("# Serial-Wifi Transfer v0.1 JPB 2021-03-17\n").encode())
+     stm.send(("# %s\n" % VERSION).encode())
      stm.send(("%s  Y2K epoch: %d\n" % (ts,time.time())).encode())     
      utime.sleep_ms(50) 
      shortBlink()       # show Network call returned    
@@ -167,7 +172,7 @@ def main():
             strMsg = str(time.time()) + "," + rawMsg
             if rawMsg[0:6] == "**HALT":
                 break  # end of serial input packet
-            if rawMsg[0:6] == "**EXIT":
+            if rawMsg[0:6] == "**EXIT":  # only used when debugging, with USB connected
                 uos.dupterm(machine.UART(0, 115200), 1) # restore local REPL
                 utime.sleep_ms(500)
                 return                
