@@ -1,6 +1,6 @@
 # ESP8266 Receives data on UART, and sends out via Wifi (network socket)
-# as client. This presumes the remote server is listening already on the socket.
-#  (eg. 'nc -l <port>' on remote host, but soon quits if output redirected?)
+# as client. This presumes a remote server is listening already on the socket.
+#  (eg. 'nc -l <port>' on remote host)
 # See: stackoverflow.com/questions/21233340/sending-string-via-socket-python
 #  J.Beale March 18 2021
 
@@ -9,12 +9,12 @@ import socket, errno  # NTP via wifi
 import time      # RTC time/date stamp
 import utime     # msec() and usec()
 import uerrno    # list of symbolic OSError codes
-#import ntptime   # stock version fixed to pool.ntp.org
+#import ntptime   # stock version fixed to 'pool.ntp.org'
 import uos       # disable REPL on uart
 import network   # check on network status
 
 # ----------------------------------------------------------------------
-server = '192.168.1.105'    # remote server to send data (rp49.local)
+server = '192.168.1.105'    # LAN server to send data (rp49.local)
 port = 8889                 # network port to communicate through
 NTP_host = '192.168.1.212'  # local NTP server with fixed IP address
 
@@ -34,10 +34,10 @@ NTP_DELTA = 3155673600
 def NTP_time(nhost):
     NTP_QUERY = bytearray(48)
     NTP_QUERY[0] = 0x1b
-    #addr = socket.getaddrinfo(NTP_host, 123)[0][-1]
-    #print(addr) # DEBUG!!
+    #addr = socket.getaddrinfo(NTP_host, 123)[0][-1]    
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(1)
+    #res = s.sendto(NTP_QUERY, addr)
     res = s.sendto(NTP_QUERY, (nhost, 123))
     msg = s.recv(48)
     s.close()
@@ -119,13 +119,12 @@ def main():
  #print("%s" % ts)
  #print("ESP8266-UART Receive to Network Socket starting")
 
- NTP_settime(NTP_host)   # custom version set to my server 
+ NTP_settime(NTP_host)   # custom version, using my local NTP server 
  
  shortBlink()       # show NTP call returned
  ts = getTS()       # Date/Time string at program start
  #print("Current time: %s" % ts)
  #print("Y2K epoch： ", time.time() )
- #return  #  ======================== DEBUG
  
 # -----------------------------------------------------
  try:
@@ -134,7 +133,7 @@ def main():
      stm.send(("%s  Y2K epoch: %d\n" % (ts,time.time())).encode())     
      utime.sleep_ms(50) 
      shortBlink()       # show Network call returned    
-     # stm.close()
+     stm.close()
  except Exception:
      longBlink()
      utime.sleep(30)       # wait for awhile in case server comes back online
@@ -175,7 +174,7 @@ def main():
             else:                        
                 recLines.append(strMsg)
         utime.sleep_ms(15)        
-        if (loopCnt > 20000):  # <== TIMEOUT sets max duration packet (20k = 5 minutes)
+        if (loopCnt > 20000):  # <== TIMEOUT sets max duration UART packet (20k = 5 minutes)
           stm.close()  # close the port and quit.
           longBlink()
           longBlink()
@@ -183,17 +182,12 @@ def main():
           machine.reset()  # hard reset, like Reset button
           break
                 
-    except Exception as ex:
+    except Exception as ex:  # (in practice, haven't seen UART exceptions)
         stm.close()
         uos.dupterm(machine.UART(0, 115200), 1) # restore local REPL
-        #utime.sleep(5) # allow time to remove signal on ESP UART Rx pin
         longBlink()
-        #print("Exception: ", ex)
-        #print("UART receive stopped, disconnect serial line")
         utime.sleep(5) # allow time to remove signal on ESP UART Rx pin
-        #for s in recLines:
-        #    print("%s  len=%d" % (s,len(s)) )
-        #machine.soft_reset()  # stop. Micropython has no exit() as there is no OS    
+        #machine.soft_reset()  # stop
 
 # ---------------------------------------------------------------------
 #   Done with UART, either error, timeout, or end of packet signal
@@ -203,14 +197,14 @@ def main():
      try:
       pktNumber += 1      
 # ----------------------------------------------------- 
-      # stm = openNet()  # open network stream & send data      
+      stm = openNet()  # open network stream & send data      
+      vBlink(0.1)      # short delay may be needed here?
       stm.send((ts+'\n').encode())
       for outs in recLines:   # transmit each stored line
         outs1 = outs + '\n'  
         stm.send(outs1.encode())
       stm.send(("# END_PACKET %d\n" % pktNumber).encode())
-      vBlink(0.1)
-      # stm.close()
+      stm.close()
 # -----------------------------------------------------       
               
      except Exception as err:         # errno.ECONNRESET:
@@ -222,9 +216,25 @@ def main():
         #print("Connection to %s reset by remote host." % server)
         longBlink()
       machine.soft_reset()  # stop. Micropython has no exit() as there is no OS
-       
-    #utime.sleep_ms(20)     
+           
 # ----- end of main ---------------------------------------------------
 
 startNet()  # check we're online; wait if we aren't
 main()
+
+"""
+One-line server on host using netcat:
+
+  while true; do nc -l 8889; done
+
+
+Example output to network port:
+ 
+# Serial-Wifi Transfer v0.1 JPB 2021-03-17
+# START 2021-03-18 17:01:18  Y2K epoch: 669402078
+# START 2021-03-18 17:01:21
+669402085,8, 0.015, 0.0163, 641877536, 3905201192, 2714268494, 2488562100
+669402086,9, 0.016, 0.0163, 2030968062, 968025008, 2613939105, 3481190652
+669402086,10, 0.016, 0.0162, 3177975081, 3659030163, 4095404096, 347380111
+# END_PACKET 1 
+"""
