@@ -1,6 +1,6 @@
 # Measure edge timing on Pin1, and also pin states Pin1,Pin2
 # MicroPython for Raspberry Pi Pico (RP2040)
-# v0.1  J.Beale 22-MAR-2021
+# v0.11  J.Beale 22-MAR-2021
 
 """             _______         _______       
 P1       ______/       \_______/       \______
@@ -162,6 +162,11 @@ def main():
     led1.off()
     led2.off()
     led3.off()
+
+    # quadrature encoder pin-state lookup, 4 bit index of last & current value of A,B inputs
+    #          0  1  2  3  4  5  6  7  8  9  10  11  12  13  14  15
+    luTable = [0,-1,+1, 0,+1, 0, 0,-1,-1, 0, 0,  +1,  0, +1, -1,  0]    
+    inState = 0
     
     vBlink(led1,150,3)     # program-starting signal from onboard LED
     print("Encoder Timer v0.1 22-March-2021 J.Beale")
@@ -190,18 +195,30 @@ def main():
     # when PIO #0 generates interrupt, load the data from FIFO into global vars
     #rp2.PIO(0).irq( doIRQ0() )
 
+    """
 #  -------------------  testing: simulate quadrature signal on output pins
     tim1 = m.Timer()
     tim2 = m.Timer()
 
-    tim1.init(freq=500, mode=m.Timer.PERIODIC, callback=tickT1)  # Ch1 cycle at this rate
-    utime.sleep_us(1000)
-    tim2.init(freq=500, mode=m.Timer.PERIODIC, callback=tickT2)  # Ch2 cycle at this rate
+    ftest = 100   # input freq, Hz
+    tim1.init(freq=ftest, mode=m.Timer.PERIODIC, callback=tickT1)  # Ch1 cycle at this rate
+    utime.sleep_ms(int(500/ftest))  # 1/100 = 0.01 * 500
+    tim2.init(freq=ftest, mode=m.Timer.PERIODIC, callback=tickT2)  # Ch2 cycle at this rate
 # --------------------------
+    """
 
     edges = 1   # how many edges to get at one time
     lcount = 0  # how many lines total sent
     pcount = 0  # how many packets sent (printed)
+    encPos = 0  # current quadrature encoder position
+    lastPos = 0 # last displayed position
+    oldTicks = 0  # starting point on clock
+    ticks = 0
+    timeData=0
+    pinData=0
+    errorCount =0  # how many encoder errors detected
+    
+    tLast = utime.ticks_us()    # time since printing encoder position
     maxTimerCount = 1<<32  # 32 bit counter rolls over here  2^32 = 4,294,967,296
     
     #(oldTicks,oldPins) = pulsein.read_blocking(1)[0]  # first call sets previous values    
@@ -238,7 +255,22 @@ def main():
             #outs += '\n'         # end of line char concludes each line
         
             # uart.write(outs)
-            print("%d" % inState)
+            inc = luTable[inState]
+            encPos += inc
+            if (inc == 0):
+                print("Encoder Error: state = %d" % inState)
+                errorCount += 1
+            #print("%d,%d" % (inc,inState))
+            #if abs(encPos - lastPos) > 20:
+            tNow = utime.ticks_us()
+            tDelta = (tNow - tLast) % (1<<30)
+            if (tDelta > 500000):         
+              #tNow = utime.ticks_us()
+              #tDelta = (tNow - tLast) % (1<<30)
+              #print("%d,%d" % (tDelta,encPos))
+              print("%d,%d" % (encPos,errorCount))
+              lastPos = encPos
+              tLast = tNow
             pcount += 1
             
         # utime.sleep_ms(5)    
