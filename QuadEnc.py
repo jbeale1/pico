@@ -20,8 +20,8 @@ import rp2                 # rp2.PIO, rp2.asm_pio
 import machine as m        # m.freq, m.Pin
 import utime               # utime.sleep
 
-#MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
-MFREQ = 125000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+#MFREQ = 125000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
 
 # ------------------------------------------------------------
 
@@ -165,7 +165,7 @@ def main():
     
     vBlink(led1,150,3)     # program-starting signal from onboard LED
     print("Encoder Timer v0.1 22-March-2021 J.Beale")
-    utime.sleep_ms(500)
+    utime.sleep_ms(100)
 
     p1 = m.Pin(16,m.Pin.IN, m.Pin.PULL_UP)   # Channel A / Pin1 input
     p2 = m.Pin(17,m.Pin.IN, m.Pin.PULL_UP)   # Channel B / Pin2 input
@@ -194,9 +194,9 @@ def main():
     tim1 = m.Timer()
     tim2 = m.Timer()
 
-    tim1.init(freq=0.5, mode=m.Timer.PERIODIC, callback=tickT1)  # blink at this rate
-    utime.sleep_ms(1000)
-    tim2.init(freq=0.5, mode=m.Timer.PERIODIC, callback=tickT2)  # blink at this rate
+    tim1.init(freq=500, mode=m.Timer.PERIODIC, callback=tickT1)  # Ch1 cycle at this rate
+    utime.sleep_us(1000)
+    tim2.init(freq=500, mode=m.Timer.PERIODIC, callback=tickT2)  # Ch2 cycle at this rate
 # --------------------------
 
     edges = 1   # how many edges to get at one time
@@ -224,20 +224,21 @@ def main():
               inState = ((inState & 0b11)<<2) | (p2.value()<<1) | p1.value()  # update pin state variable
             newDataFlag = 0                  # reset flag for next time        
             lcount += 1        
-            outs = ("%d," % lcount)                    
-            outs += '{0:02d},{1:04b},{2:d}'.format(inState,inState,delta)
+            #outs = ("%d," % lcount)                    
+            #outs += '{0:02d},{1:04b},{2:d}'.format(inState,inState,delta)
+
             oldTicks = ticks
-            #oldPins = pVal << 2
-            i += 1
-            if i != edges: 
-                outs += ","
+
+            #i += 1
+            #if i != edges: 
+            #    outs += ","
                 
             # outs += str(oldTicks)
             oldTicks = (oldTicks - 2*i) % maxTimerCount
-            outs += '\n'         # end of line char concludes each line
+            #outs += '\n'         # end of line char concludes each line
         
             # uart.write(outs)
-            print(outs,end='')
+            print("%d" % inState)
             pcount += 1
             
         # utime.sleep_ms(5)    
