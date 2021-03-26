@@ -18,10 +18,12 @@ https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
 
 import rp2                 # rp2.PIO, rp2.asm_pio
 import machine as m        # m.freq, m.Pin
-import time               # time.sleep, time.ticks
+import utime               # utime.sleep, utime.ticks
 
-MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
-#MFREQ = 125000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+#MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+MFREQ = 125000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+
+VERSION = "Quad Timer v0.04 26-March-2021 J.Beale"
 # ------------------------------------------------------------
 
 # monitor falling and rising edges on an input pin
@@ -29,6 +31,9 @@ MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
 def trackPin():        
     wrap_target()    
     mov(x, 0)       # load X scratch reg. with max value (2^32-1)
+    label('start')
+    jmp(pin, 'start')  # jump when pin1 is high
+    
     jmp(x_dec,'loop1')
     
     # ===== now pin is high: Dec X, exit when pin1 goes low
@@ -62,17 +67,17 @@ def trackPin():
 def vBlink(p,t,n):      # blink LED on pin p, duration t milliseconds, repeat n times
     for i in range(n):
         p.value(1)
-        time.sleep_ms(t)
+        utime.sleep_ms(t)
         p.value(0)   # Pico, ESP32: 0 means LED off
-        time.sleep_ms(t)
+        utime.sleep_ms(t)
 # -----------------------------------------
 
 def irq_handle(sm):            # handle interrupt
       global stateEnc, uFlag      
       global luTable, countEnc
 
-      t = (0xffffffff - sm.get())  # counter value
-      print(t)
+      t = (0xffffffff - sm.get())  # counter value      
+      # print(t)
       ps = sm.get()                # pin state P2,P1
       stateEnc = ((stateEnc&0b11)<<2) | ps
       countEnc += luTable[stateEnc]  # count up or down      
@@ -98,6 +103,11 @@ def main():
     led2.off()
     led3.off()
     
+    vBlink(led1,100,4)  # blink pattern to indicate program start
+    utime.sleep_ms(500)
+    vBlink(led1,200,4)
+    utime.sleep_ms(1500)
+    
     # quadrature encoder pin-state lookup, 4 bit index of last & current value of A,B inputs
     #          0  1  2  3  4  5  6  7  8  9  10  11  12  13  14  15    
     luTable = [0,-1,+1, 0,+1, 0, 0,-1,-1, 0, 0,  +1,  0, +1, -1,  0]  # for both pins P1,P2
@@ -105,28 +115,33 @@ def main():
     countEnc = 0
     
     #vBlink(led1,150,3)     # program-starting signal from onboard LED
-    print("Quad Timer v0.03 24-March-2021 J.Beale")
-    time.sleep_ms(100)
+    
+    utime.sleep_ms(100)
 
     p1 = m.Pin(16,m.Pin.IN, m.Pin.PULL_UP)   # Channel A / Pin1 input
     p2 = m.Pin(17,m.Pin.IN, m.Pin.PULL_UP)   # Channel B / Pin2 input
   
-    print("Creating SMs...")
-    sm0 = rp2.StateMachine(0, trackPin, freq=MFREQ, in_base=p1, jmp_pin=p1)   # sm 0-3 in first PIO instance
-    sm1 = rp2.StateMachine(1, trackPin, freq=MFREQ, in_base=p1, jmp_pin=p2)
+    fsm = int(MFREQ/1000)
+    sm0 = rp2.StateMachine(0, trackPin, freq=fsm, in_base=p1, jmp_pin=p1)   # sm 0-3 in first PIO instance
+    sm1 = rp2.StateMachine(1, trackPin, freq=fsm, in_base=p1, jmp_pin=p2)
 
     sm0.irq(irq_handle)
     sm1.irq(irq_handle)
-
-    print("Starting up SMs...")    
+    
     sm0.active(1)
     sm1.active(1)
 
-    print("Starting main loop.")
+    print("n,msec,pos")  # CSV header line
+    print("# %s" % VERSION)
     lCnt = 0
+    pCnt = 0
+    dRatio = 10
     while True:
-        if uFlag:          # update flag true when new data available          
-          print("%d %d %d" % (uFlag,lCnt,countEnc))
+        if uFlag:          # update flag true when new data available
+          ms = utime.ticks_ms()
+          if (lCnt % dRatio == 0):
+            print("%d,%d,%d" % (pCnt,ms,countEnc))
+            pCnt += 1
           uFlag = 0
           lCnt += 1
           led1.toggle()       
