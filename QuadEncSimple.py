@@ -117,7 +117,7 @@ def irq_handle(sm):            # handle interrupt
       stateEnc = ((stateEnc&0b11)<<2) | ps
       countEnc += luTable[stateEnc]  # count up or down      
       #uFlag |= (sm.id()+1)  # add state machine ID to flag
-      uFlag |= (ps & 0b11)  # add bit pattern to flag
+      uFlag = 1   # add bit pattern to flag
     
 # ----------------------------------------- 
 def main():
@@ -142,7 +142,7 @@ def main():
     vBlink(led1,100,4)  # blink pattern to indicate program start
     utime.sleep_ms(500)
     vBlink(led1,200,4)
-    utime.sleep_ms(1500)
+    utime.sleep_ms(3500)
     
     # quadrature encoder pin-state lookup, 4 bit index of last & current value of A,B inputs
     #          0  1  2  3  4  5  6  7  8  9  10  11  12  13  14  15    
