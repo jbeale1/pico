@@ -82,6 +82,7 @@ def main():
   global luTable   # encoder output lookup table
   global led1
 
+  machine.freq(200000000)
   led1 = Pin(25, Pin.OUT)
   led1.off()
 
@@ -94,12 +95,12 @@ def main():
   chB = Pin(15,Pin.IN,Pin.PULL_UP)  # encoder B input signal
   chFlag = Pin(16)  # Flag signal, goes high for 2 cycles when chA or chB edge detected
 
-  sm2 = StateMachine(2, trigger, freq=100_000_000, in_base=chA, set_base = chFlag)
+  sm2 = StateMachine(2, trigger, freq=200_000_000, in_base=chA, set_base = chFlag)
   sm2.active(1)
-  sm3 = StateMachine(3, trigger, freq=100_000_000, in_base=chB, set_base = chFlag)
+  sm3 = StateMachine(3, trigger, freq=200_000_000, in_base=chB, set_base = chFlag)
   sm3.active(1)
 
-  sm4 = StateMachine(4, counter, freq=100_000_000, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
+  sm4 = StateMachine(4, counter, freq=200_000_000, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
   sm4.irq(counter_handler)
 
   PIO0_BASE = 0x50200000
