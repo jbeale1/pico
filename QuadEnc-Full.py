@@ -23,7 +23,7 @@ from time import ticks_ms, ticks_us, ticks_diff, sleep, sleep_ms
 import array
 
 MFREQ = 200_000_000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
-VERSION = "Quadrature Readout v0.2 28-March-2021 J.Beale"
+VERSION = "Quadrature Readout v0.21 28-March-2021 J.Beale"
 
 # -----------------------------------------
 def vBlink(p,t,n):      # blink LED on pin p, duration t milliseconds, repeat n times
@@ -110,7 +110,7 @@ def main():
   chB = Pin(15,Pin.IN,Pin.PULL_UP)  # encoder B input signal
   chFlag = Pin(16)  # Flag signal, goes high for 2 cycles when chA or chB edge detected
 
-  smf = MFREQ  # was 200M
+  smf = int(MFREQ/1)  # was 200M
   sm2 = StateMachine(2, trigger, freq=smf, in_base=chA, set_base = chFlag)  # watch Ch.A
   sm2.active(1)
   sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
@@ -126,7 +126,11 @@ def main():
       if (dIdx != i):  # any new data in the buffer?
           stateEnc = ((stateEnc & 0b11)<<2) | (dataB[i] & 0b11)  # calc. state from chA,chB 
           posEnc += luTable[stateEnc]         # increment current encoder position based on state
-          print("{0:6d},{1:8d}".format(posEnc,dataT[i]))
+          sum = 2                         # 2 extra counts per 4 readings
+          for j in range(4):     # find sum over most recent 4 time readings
+              pi = (i-j) % ASIZE
+              sum += dataT[pi]
+          print("{0:6d},{1:8d}".format(posEnc,sum))
           i = (i+1) % ASIZE
           led1.toggle()           
 # ---------------
