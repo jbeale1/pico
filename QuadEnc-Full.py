@@ -1,151 +1,133 @@
-# Measure edge timing on Pin1, and also pin states Pin1,Pin2
 # Track quadrature encoder position using all four edges
 # MicroPython for Raspberry Pi Pico (RP2040)
-# J.Beale 25-MAR-2021
+# based on https://www.raspberrypi.org/forums/viewtopic.php?p=1842706#p1842706
+# J.Beale 28-MAR-2021
 
-"""             _______         _______       
-P1       ______/       \_______/       \______
+"""
+A,B output signals from a quadrature encoder
+                _______         _______       
+A        ______/       \_______/       \______
             _______         _______         __
-P2       __/       \_______/       \_______/  
-           A   B   C   D   E   F
+B        __/       \_______/       \_______/  
+           1   2   3   4   5   6  ...
            
-Time P1 edges (B-D, D-F) with a resolution of 2 * Tclock  (8 ns @ F=250MHz)
-also record (P1,P2) levels at 2..4 cycles after each P1 edge
-
+Record A, B levels at each transition (1, 2, 3, ...)
+Use lookup table to find change in encoder position (+1, 0, -1)
     GP## numbering as per RasPi Pico pinout on p.4 of
 https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
 """
 
-import rp2                 # rp2.PIO, rp2.asm_pio
-import machine as m        # m.freq, m.Pin
-import utime               # utime.sleep, utime.ticks
+from machine import Pin, mem32
+from rp2 import asm_pio, StateMachine, PIO
+from time import ticks_ms, ticks_us, ticks_diff, sleep, sleep_ms
+import array
 
-#MFREQ = 250000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
-MFREQ = 125000000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+MFREQ = 200_000_000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+VERSION = "Quadrature Readout v0.2 28-March-2021 J.Beale"
 
-VERSION = "Quad Timer v0.04 26-March-2021 J.Beale"
-# ------------------------------------------------------------
-
-# monitor falling and rising edges on an input pin
-@rp2.asm_pio()
-def trackPin():        
-    wrap_target()    
-    mov(x, 0)       # load X scratch reg. with max value (2^32-1)
-    label('start')
-    jmp(pin, 'start')  # jump when pin1 is high
-    
-    jmp(x_dec,'loop1')
-    
-    # ===== now pin is high: Dec X, exit when pin1 goes low
-    label('loop1')
-    jmp(x_dec,'continue')  # decrement X, jump if zero
-    label('continue')
-    jmp(pin, 'loop1')  # jump when pin1 is high 
-    # ====             send out X counter value
-    mov(isr,x)       # transfer X to input shift register
-    push()           # transfer shift register to FIFO
-    in_(pins, 2)     # read two bits (Pin1,Pin2) into ISR
-    push()           # send them to FIFO (also zeroing ISR)
-    irq(noblock, 0x10)  # notify main code
-                      # input pin is now low
-    mov(x,0)                      
-    jmp(x_dec,'loop') # X <- (2^32-1)
-                      # ==== Dec X, exit when pin1 goes high
-    label('loop')
-    jmp(pin, 'exit')  # jump when pin1 is high 
-    jmp(x_dec,'loop') # decrement X, jump if zero
-    label('exit')
-    # ====             send out X counter value
-    mov(isr,x)       # transfer X to input shift register
-    push()           # transfer shift register to FIFO
-    in_(pins, 2)     # read two bits (Pin1,Pin2) into ISR
-    push()           # send them to FIFO (also zeroing ISR)
-    irq(noblock, 0x10)  # notify main code
-    wrap()
 # -----------------------------------------
-
 def vBlink(p,t,n):      # blink LED on pin p, duration t milliseconds, repeat n times
     for i in range(n):
         p.value(1)
-        utime.sleep_ms(t)
-        p.value(0)   # Pico, ESP32: 0 means LED off
-        utime.sleep_ms(t)
+        sleep_ms(t)
+        p.value(0)      # Pico, ESP32: 0 means LED off
+        sleep_ms(t)
 # -----------------------------------------
 
-def irq_handle(sm):            # handle interrupt
-      global stateEnc, uFlag      
-      global luTable, countEnc
+# generate a 2-cycle flag signal after every input edge
+# one instance of SM will watch Ch.A, the other Ch.B
+@asm_pio(set_init=PIO.OUT_HIGH)  
+def trigger():
+    wait(1, pin, 0)  # wait for input pin to go high
+    set(pins, 1) [2] # set flag bit for 2 cycles
+    set(pins, 0)     # and return it low
+    wait(0, pin, 0)  # wait for input pin to go low
+    set(pins, 1) [2] # set flag bit for 2 cycles
+    set(pins, 0)     # and return it low
+                     # and loop around again
 
-      t = (0xffffffff - sm.get())  # counter value      
-      # print(t)
-      ps = sm.get()                # pin state P2,P1
-      stateEnc = ((stateEnc&0b11)<<2) | ps
-      countEnc += luTable[stateEnc]  # count up or down      
-      uFlag |= (sm.id()+1)  # add state machine ID to flag
+@asm_pio(sideset_init=PIO.OUT_LOW)
+def counter():    
+    wait(1, pin, 2)    # initial synchronization with edge flag
     
-# ----------------------------------------- 
+    wrap_target()       # -- top of main r (run-forever) loop    
+    label("loop")       # --- top of inner 4-cycle loop
+    set(x, 0) .side(0)  
+    wait(0, pin, 2)     # continue when edge flag low (it almost always is)
+    in_(pins, 2)
+    push()              # note that PUSH can stall if FIFO fills
+    jmp(x_dec, "counter_start")
+    
+    label("counter_start")      # inner 2-cycle timing loop
+    jmp(pin, "output")          # runs until edge flag goes high
+    jmp(x_dec, "counter_start")
+    label("output")
+    
+    mov(isr, invert(x)) .side(1)
+    push()    
+    
+    irq(noblock, 0x10)   # signal 2 words of data are now ready to read    
+    wrap()               # ----- repeat forever
+
+ASIZE = 1023                        # size of circular data buffers (dataT, dataB)
+dataT = array.array("I", [0]*ASIZE)  # store UINT32 timing data
+dataB = array.array("B", [0]*ASIZE)  # store UCHAR bits (Ch.A, Ch.B values)
+dIdx = 0                         # curent index into DATA array
+
+def counter_handler(sm):
+    global dIdx
+    dataB[dIdx] = sm.get() & 0b11    # read chA,chB
+    dataT[dIdx] = sm.get() + 4       # read timer value
+    dIdx = (dIdx + 1) % ASIZE           # increment index in circular buffer
+    
+# --------------------------------------------
 def main():
-    global led1,led2,led3
-    global p1   # so p2 interrupt handler can read the pin
-    global timeData,pinData,newDataFlag
-    global pulsein, pulsein2
-    global stateEnc  # 4-bit pin state variable (p2old,p1old,p2new,p1new)
-    global uFlag
-    global luTable
-    global countEnc  # current encoder position
+  global start
+  global stateEnc
+  global posEnc
+  global luTable   # encoder output lookup table
+  global led1
+  global dIdx      # index into data buffers, updated in interrupt routine
 
-    m.freq(MFREQ)      # set CPU frequency; not necessarily the default 125 MHz       
-    uFlag = False    # haven't got any new data yet
-    led1 = m.Pin(25, m.Pin.OUT)              # set pin 25 (driving onboard LED) to output
-    led2 = m.Pin(22, m.Pin.OUT)              # set external output pin (driving offboard LED) to output
-    led3 = m.Pin(21, m.Pin.OUT)              # set external output pin (driving offboard LED) to output
-    led1.off()
-    led2.off()
-    led3.off()
+  machine.freq(MFREQ)
+  led1 = Pin(25, Pin.OUT)
+  led1.off()
+
+  vBlink(led1,100,4)  # 4 short, 4 long blinks to indicate program start
+  sleep_ms(500)
+  vBlink(led1,200,4)
+  sleep_ms(4000)  # delay allows starting recording program
     
-    vBlink(led1,100,4)  # blink pattern to indicate program start
-    utime.sleep_ms(500)
-    vBlink(led1,200,4)
-    utime.sleep_ms(1500)
+  print("pos,ticks")       # CSV header line
+  print("# %s" % VERSION)
     
-    # quadrature encoder pin-state lookup, 4 bit index of last & current value of A,B inputs
-    #          0  1  2  3  4  5  6  7  8  9  10  11  12  13  14  15    
-    luTable = [0,-1,+1, 0,+1, 0, 0,-1,-1, 0, 0,  +1,  0, +1, -1,  0]  # for both pins P1,P2
-    stateEnc = 0
-    countEnc = 0
-    
-    #vBlink(led1,150,3)     # program-starting signal from onboard LED
-    
-    utime.sleep_ms(100)
+  posEnc= 0
+  stateEnc = 0  # 4-bit encoder state (P2old,P1old,P2new,P1new)
+  luTable = [0,-1,+1, 0,+1, 0, 0,-1,-1, 0, 0,  +1,  0, +1, -1,  0]  # for both pins P1,P2
+  start = ticks_us()
 
-    p1 = m.Pin(16,m.Pin.IN, m.Pin.PULL_UP)   # Channel A / Pin1 input
-    p2 = m.Pin(17,m.Pin.IN, m.Pin.PULL_UP)   # Channel B / Pin2 input
-  
-    fsm = int(MFREQ/1000)
-    sm0 = rp2.StateMachine(0, trackPin, freq=fsm, in_base=p1, jmp_pin=p1)   # sm 0-3 in first PIO instance
-    sm1 = rp2.StateMachine(1, trackPin, freq=fsm, in_base=p1, jmp_pin=p2)
+  chA = Pin(14,Pin.IN,Pin.PULL_UP)  # encoder A input signal
+  chB = Pin(15,Pin.IN,Pin.PULL_UP)  # encoder B input signal
+  chFlag = Pin(16)  # Flag signal, goes high for 2 cycles when chA or chB edge detected
 
-    sm0.irq(irq_handle)
-    sm1.irq(irq_handle)
-    
-    sm0.active(1)
-    sm1.active(1)
+  smf = MFREQ  # was 200M
+  sm2 = StateMachine(2, trigger, freq=smf, in_base=chA, set_base = chFlag)  # watch Ch.A
+  sm2.active(1)
+  sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
+  sm3.active(1)
+                   # count time between edges on both Ch.A and Ch.B
+  sm4 = StateMachine(4, counter, freq=smf, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
+  sm4.irq(counter_handler)
 
-    print("n,msec,pos")  # CSV header line
-    print("# %s" % VERSION)
-    lCnt = 0
-    pCnt = 0
-    dRatio = 10
-    while True:
-        if uFlag:          # update flag true when new data available
-          ms = utime.ticks_ms()
-          if (lCnt % dRatio == 0):
-            print("%d,%d,%d" % (pCnt,ms,countEnc))
-            pCnt += 1
-          uFlag = 0
-          lCnt += 1
-          led1.toggle()       
+  sm4.active(1)
 
-# ---------  End Main Loop  -----------------------------------------    
-
+  i = 0  # starting index into data arrays
+  while True:  # all the action is in the interrupt routine
+      if (dIdx != i):  # any new data in the buffer?
+          stateEnc = ((stateEnc & 0b11)<<2) | (dataB[i] & 0b11)  # calc. state from chA,chB 
+          posEnc += luTable[stateEnc]         # increment current encoder position based on state
+          print("{0:6d},{1:8d}".format(posEnc,dataT[i]))
+          i = (i+1) % ASIZE
+          led1.toggle()           
+# ---------------
 main()
