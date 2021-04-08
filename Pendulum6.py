@@ -1,6 +1,6 @@
 # Track position of pendulum flag (2 low-high pulses per full swing)
 # MicroPython for Raspberry Pi Pico (RP2040)
-# J.Beale 06-APR-2021
+# J.Beale 08-APR-2021
 
 """    GP## numbering as per RasPi Pico pinout on p.4 of
 https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
@@ -32,6 +32,22 @@ def stdev(data):
     m,var = variance(data)
     std_dev = math.sqrt(var)
     return m,std_dev
+
+
+def driveStart():   # start pendulum swinging from standstill
+    out1 = Pin(2, Pin.OUT)  # output to drive coil
+    out1.off()
+    
+    qPeriod = int(1013807.708/4)    # half swing period in milliseconds
+    cycles = 80  # 100: v=0.027751   80: 0.026835
+    while cycles > 0:
+        out1.on()
+        sleep_us(qPeriod)
+        out1.off()
+        sleep_us(3*qPeriod)
+        cycles -= 1
+
+# --------------------------------------------------------------
 
 # generate a 2-cycle flag signal after every input edge
 # one instance of SM will watch Ch.A, the other Ch.B
@@ -133,7 +149,10 @@ def main():
   # print("Counts per sec = %d" % countsPerSec)
   aHigh = 0;  aLow = 0
   aHighOld = 0; aLowOld = 0
-  durStart = 21000   # initial microseconds duration of drive pulse
+  skip = False       # True to skip one half-swing to align drive phase
+  # durStart = 21000   # initial microseconds duration of drive pulse
+  durStart = 15_000   # initial microseconds duration of drive pulse
+  durMax =  250_000    # maximum allowed drive period
   v1Setpoint = 0.025 # target velocity (m/s)
   intTerm = 0        # integral term correction of drive output
   kp = 4E7           # proportional control constant (was kp,ki: 2E7,5E4)
@@ -143,7 +162,9 @@ def main():
   rCount = 0  # total number of reading pairs received
   i = 0  # starting index into data arrays
   j = 0  # index into deltaA[]
-  
+
+  #driveStart()  # get pendulum swinging enough to read position output
+
   while True:                 # get the first 4 readings, both high & low
       if (dIdx != i):  # any new data in the buffer?
         if (dataB[i] & 0x01):   # is input A high or low level now?
@@ -157,6 +178,7 @@ def main():
             aSumOld = aHigh + aLow
             v1 = flagWidth / (aLow / countsPerSec)  # velocity = distance / time
             v2 = v1
+            vErrorOld = ((v1+v2)/2) - v1Setpoint
             dV1f = 0
             dV2f = 0
             v1Old = v1; v2Old = v2  # remember previous velocity
@@ -164,12 +186,6 @@ def main():
 
   while True:  # all the action is in the interrupt routine
       if (dIdx != i):  # any new data in the buffer?
-          #stateEnc = ((stateEnc & 0b11)<<2) | (dataB[i] & 0b11)  # calc. state from chA,chB 
-          #posEnc += luTable[stateEnc]         # increment current encoder position based on state
-          #sum = 2                         # 2 extra counts per 4 readings
-          #for j in range(4):     # find sum over most recent 4 time readings
-          #    pi = (i-j) % ASIZE
-          #    sum += dataT[pi]
           if (dataB[i] & 0x01):   # is input A high or low level now?
               aHigh = dataT[i]
           else:
@@ -178,7 +194,7 @@ def main():
               aSum = aHigh + aLow
               v1 = flagWidth / (aLow / countsPerSec)  # velocity = distance / time
               v2 = flagWidth / (aLowOld / countsPerSec)  # velocity = distance / time
-              cOffset = 24012094
+              cOffset = 24_012_094
               aDiff = aSum - aSumOld  # difference in clock ticks between alternate half-swings
               if (rCount % 2) == 0:
                   msNow = ticks_diff(ticks_ms(),start_ms)
@@ -188,9 +204,13 @@ def main():
                   dV2f = dV2f * (1.0-f) + (f * dV2)  # low-pass filtered version of dV1
                   led1.toggle()
                   out1.on()
-                  v1Error = (v1 - v1Setpoint)
-                  intTerm += int(v1Error * ki)  # integral control
-                  driveDur = durStart - int(v1Error * kp) - intTerm
+                  vError = ((v1+v2)/2) - v1Setpoint
+                  dvError = (vError - vErrorOld)*1E3
+                  vErrorOld = vError
+                  intTerm += int(vError * ki)  # integral control
+                  driveDur = durStart - int(vError * kp) - intTerm
+                  if driveDur > durMax:
+                      driveDur = durMax
                   
                   if driveDur < 0:
                       driveDur = 0
@@ -198,8 +218,8 @@ def main():
                                      # @ v1=.0284, 20:-4u, 0:-22u
                   out1.off()
                   print("%d," % msNow,end="")
-                  print("{0:8d},{1:5d},{2:9.6f},{3:9.6f},{4:5.2f},{5:5.2f},{6:d}"
-                          .format(aSum,aDiff+cOffset,v1,v2,dV1f,dV2f,driveDur),end="")
+                  print("{0:8d},{1:5d},{2:9.6f},{3:9.6f},{4:d},{5:5.3f},{6:d}"
+                          .format(aSum,aDiff+cOffset,v1,v2,intTerm,dvError,driveDur),end="")
                   deltaA[j] = aDiff       # store in array for stdev calc
                   v1Old = v1; v2Old = v2  # remember previous velocity
                   #j += 1
