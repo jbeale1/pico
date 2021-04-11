@@ -39,7 +39,7 @@ def main():
     oldStart = falseStart     # no false starts yet
     while trial < totalTries:
         trial += 1
-        waitTime = urandom.randrange(2000,5000)  # wait in range of this many msec
+        waitTime = urandom.randrange(2000,4000)  # wait in range of this many msec
         inA.irq(trigger=Pin.IRQ_FALLING, handler=earlyTrigger)  # start interrupt handler
         loopCtr = waitTime / unitWait
         while loopCtr > 0:
@@ -65,6 +65,9 @@ def main():
         lowest = min(lowest, sec)
         sum += sec
         urandom.seed(delay)   # use variable delay to make the numbers actually random
+        while not inA.value():  # if still low, wait for it to go high 
+          pass
+        time.sleep_ms(100)    # debouncing wait
         
     vBlink(led,150,5)         # signal that we are now done
     average = (sum / trial)    
