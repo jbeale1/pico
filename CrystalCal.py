@@ -23,22 +23,6 @@ def getBoardID():  # return string with 32-bit ID from Pico flash chip
     idStr += (hex(b)[2:]) + " "
   return(idStr)
 
-def vBlink(p,t,n):      # blink LED on pin p, duration t milliseconds, repeat n times
-    for i in range(n):
-        p.value(1)
-        sleep_ms(t)
-        p.value(0)      # on Pico and ESP32: 0 means LED off
-        sleep_ms(t)
-# -----------------------------------------
-def variance(data, ddof=1):  # ddof: 0=population, 1=sample
-    n = len(data)
-    mean = sum(data) / n
-    return (mean,sum((x - mean) ** 2 for x in data) / (n - ddof))
-
-def stdev(data):   # return mean and standard deviation of data
-    m,var = variance(data)
-    std_dev = math.sqrt(var)
-    return m,std_dev
 # --------------------------------------------------------------
 
 # generate a 2-cycle flag signal after every input edge
@@ -99,12 +83,7 @@ def main():
   machine.freq(MFREQ)
   led1 = Pin(25, Pin.OUT)
   led1.off()
-  
-  # vBlink(led1,100,4)  # 4 short, 4 long blinks to indicate program start
-  # sleep_ms(500)
-  # vBlink(led1,200,4)
-  # sleep_ms(4000)  # delay allows starting recording program
-  
+    
   print("epoch, ticks, dT, degC")   # write CSV header line
   ID = getBoardID()
   print("# %s  Board_ID: %s" % (VERSION,ID))
@@ -122,13 +101,10 @@ def main():
   # count time between edges on Ch.A (and also Ch.B, if that SM active)
   sm4 = StateMachine(4, counter, freq=smf, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
   sm4.irq(counter_handler)
+  sm4.active(1)  
 
-  sm4.active(1)
-
-  flagWidth = 5.0 * 1E-3   # width of interrupter flag, in meters
-
-  aHigh = 0;  aLow = 0
-  aHighOld = 0; aLowOld = 0
+  aHigh = 0;  aLow = 0       # counts when Ch.A is high and low
+  aHighOld = 0; aLowOld = 0  # previous value of counts
   
   rCount = 0  # total number of pulses received
   i = 0  # starting index into circular buffers 
