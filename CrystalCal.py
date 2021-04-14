@@ -63,35 +63,36 @@ def counter():
     label("loop")       # --- top of inner 4-cycle loop
     set(x, 0) .side(0)  
     wait(0, pin, 2)     # continue when edge flag low (it almost always is)
-    in_(pins, 2)
-    push()              # note that PUSH can stall if FIFO fills
-    jmp(x_dec, "counter_start")
+    in_(pins, 2)        # capture Ch.A and Ch.B input levels, and...
+    push()              # ...send them out. Note: PUSH stalls if FIFO fills
+    jmp(x_dec, "counter_start")  # X will down-count from 0xFFFFFFFF
     
     label("counter_start")      # inner 2-cycle timing loop
     jmp(pin, "output")          # runs until edge flag goes high
-    jmp(x_dec, "counter_start")
-    label("output")
+    jmp(x_dec, "counter_start") # decrement X every two instructions
+    label("output")             # loop exit on Flag, or if X reaches 0
     
-    mov(isr, invert(x)) .side(1)
+    mov(isr, invert(x)) .side(1)  # invert(x) = actual number of loop cycles
     push()    
     
     irq(noblock, 0x10)   # signal 2 words of data are now ready to read    
     wrap()               # ----- repeat forever
 
+# ----------------------------------------------------------------------------------
 ASIZE = 1023                         # size of circular data buffers (dataT, dataB)
-dataT = array.array("I", [0]*ASIZE)  # store UINT32 timing data
+dataT = array.array("I", [0]*ASIZE)  # store UINT32 loop count data
 dataB = array.array("B", [0]*ASIZE)  # store UCHAR bits (Ch.A, Ch.B values)
-dIdx = 0                         # curent index into DATA array
+dIdx = 0                             # curent index into buffers
 
-def counter_handler(sm):
+def counter_handler(sm):   # SM interrupt: stash A,B levels & pulse time in circular buffers
     global dIdx
-    dataB[dIdx] = sm.get() & 0b11    # read chA,chB
-    dataT[dIdx] = sm.get() + 4       # read timer value
+    dataB[dIdx] = sm.get() & 0b11    # input levels: chA, chB
+    dataT[dIdx] = sm.get() + 4       # pulse time value, account for loop overhead
     dIdx = (dIdx + 1) % ASIZE        # increment index in circular buffer
     
 # --------------------------------------------
 def main():
-  global start
+  #global start
   global stateEnc
   global posEnc
   global luTable   # encoder output lookup table
@@ -111,36 +112,30 @@ def main():
   # vBlink(led1,200,4)
   # sleep_ms(4000)  # delay allows starting recording program
   
-  # write CSV header line
-  print("epoch, ticks, dT, degC")
+  print("epoch, ticks, dT, degC")   # write CSV header line
   ID = getBoardID()
   print("# %s  Board_ID: %s" % (VERSION,ID))
     
-  start = ticks_us()
-  start_ms = ticks_ms()
-
   chA = Pin(16,Pin.IN,Pin.PULL_UP)  # encoder A input signal
   #chB = Pin(17,Pin.IN,Pin.PULL_UP)  # encoder B input signal
   chFlag = Pin(18)  # Flag signal, goes high for 2 cycles when chA or chB edge detected
 
-  #smf = int(MFREQ/10)  # was 200M
   smf = int(MFREQ)  # state machine clock frequency
   sm2 = StateMachine(2, trigger, freq=smf, in_base=chA, set_base = chFlag)  # watch Ch.A
   sm2.active(1)
   #sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
   #sm3.active(1)
-                   # count time between edges on both Ch.A and Ch.B
+
+  # count time between edges on both Ch.A and Ch.B
   sm4 = StateMachine(4, counter, freq=smf, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
   sm4.irq(counter_handler)
 
   sm4.active(1)
 
   flagWidth = 5.0 * 1E-3   # width of interrupter flag, in meters
-  countsPerSec = smf / 2   # count rate is 1/2 of state machine frequency
 
   aHigh = 0;  aLow = 0
   aHighOld = 0; aLowOld = 0
-  skip = False       # True to skip one half-swing to align drive phase
   
   rCount = 0  # total number of reading pairs received
   i = 0  # starting index into data arrays  
@@ -161,26 +156,25 @@ def main():
   sensor_temp = machine.ADC(4)       # Pico internal temperature sensor
   conversion_factor = 3.3 / (65535)  # ADC scaling
 
-  while True:  # all the action is in the interrupt routine
+  while True:  # all data acquisition is in the interrupt routine
       if (dIdx != i):  # any new data in the buffer?
-          if (dataB[i] & 0x01):   # is input A high or low level now?
-              aHigh = dataT[i]
+          if (dataB[i] & 0x01):   # is input A at high or low level now?
+              aHigh = dataT[i]    # high pulse time duration from buffer
           else:
-              rCount += 1
-              aLow = dataT[i]
-              aSum = aHigh + aLow
+              rCount += 1             # count total pulses
+              aLow = dataT[i]         # low pulse time from buffer
+              aSum = aHigh + aLow     # total pulse period = high + low durations
               aDiff = aSum - aSumOld  # difference in clock ticks between alternate pulses
-              if (rCount % 2) == 0:
-                  msNow = ticks_diff(ticks_ms(),start_ms)
+              if (rCount % 2) == 0:                  
                   led1.toggle()
-                  secEpoch = time()
+                  secEpoch = time()   # microPython epoch, not Unix epoch
                   reading = sensor_temp.read_u16() * conversion_factor
-                  degC = 27 - (reading - 0.706)/0.001721
+                  degC = 27 - (reading - 0.706)/0.001721  # RP2040 device internal temperature
                   print("%d,%8d,%2d,%5.2f" % (secEpoch,aSum,aDiff,degC))
               aHighOld = aHigh
               aLowOld = aLow
               aSumOld = aSum
-          i = (i+1) % ASIZE
+          i = (i+1) % ASIZE  # advance circular buffer index
 
 # ---------------
 main()
