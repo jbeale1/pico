@@ -2,21 +2,20 @@
 # MicroPython for Raspberry Pi Pico (RP2040)
 # J.Beale 14-APR-2021
 
-"""    GP## numbering as per RasPi Pico pinout on p.4 of
-https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
-"""
+#    GP## numbering as per RasPi Pico pinout on p.4 of
+# https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
 
-from machine import Pin, mem32
-from rp2 import asm_pio, StateMachine, PIO
-from time import ticks_ms, ticks_us, ticks_diff, sleep, sleep_ms, sleep_us, time
-import array
+from machine import Pin  # access GPIO pins
+from rp2 import asm_pio, StateMachine, PIO  # state machine
+from time import sleep_ms, time  # delay, and RTC time/date
+import array  # for circular data buffers
 import math   # for sqrt in standard deviation
 
-MFREQ = 200_000_000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
+MFREQ = 200_000_000  # CPU frequency in Hz (typ. 125 MHz; Overclocks to 250 MHz)
 VERSION = "Pulse Time v1 14-April-2021 J.Beale"
 
 # -----------------------------------------
-def getBoardID():
+def getBoardID():  # return string with 32-bit ID from Pico flash chip
   import machine
   s = machine.unique_id()
   idStr=""
@@ -28,7 +27,7 @@ def vBlink(p,t,n):      # blink LED on pin p, duration t milliseconds, repeat n 
     for i in range(n):
         p.value(1)
         sleep_ms(t)
-        p.value(0)      # Pico, ESP32: 0 means LED off
+        p.value(0)      # on Pico and ESP32: 0 means LED off
         sleep_ms(t)
 # -----------------------------------------
 def variance(data, ddof=1):  # ddof: 0=population, 1=sample
@@ -36,11 +35,10 @@ def variance(data, ddof=1):  # ddof: 0=population, 1=sample
     mean = sum(data) / n
     return (mean,sum((x - mean) ** 2 for x in data) / (n - ddof))
 
-def stdev(data):
+def stdev(data):   # return mean and standard deviation of data
     m,var = variance(data)
     std_dev = math.sqrt(var)
     return m,std_dev
-
 # --------------------------------------------------------------
 
 # generate a 2-cycle flag signal after every input edge
@@ -82,26 +80,21 @@ def counter():
 ASIZE = 1023                         # size of circular data buffers (dataT, dataB)
 dataT = array.array("I", [0]*ASIZE)  # store UINT32 loop count data
 dataB = array.array("B", [0]*ASIZE)  # store UCHAR bits (Ch.A, Ch.B values)
-dIdx = 0                             # curent index into buffers
+dIdx = 0                             # current index into buffers
 
-def counter_handler(sm):   # SM interrupt: stash A,B levels & pulse time in circular buffers
+def counter_handler(sm):   # SM interrupt: store A,B levels & pulse time in circular buffers
     global dIdx
     dataB[dIdx] = sm.get() & 0b11    # input levels: chA, chB
-    dataT[dIdx] = sm.get() + 4       # pulse time value, account for loop overhead
+    dataT[dIdx] = sm.get() + 4       # pulse time value, and account for loop overhead
     dIdx = (dIdx + 1) % ASIZE        # increment index in circular buffer
     
+    
+# Background: interrupt routine counter_handler() stores levels and timing in circular buffers
+# Foreground: the main() routine retrieves the buffer data, and prints it out
 # --------------------------------------------
 def main():
-  #global start
-  global stateEnc
-  global posEnc
-  global luTable   # encoder output lookup table
   global led1
   global dIdx      # index into data buffers, updated in interrupt routine
-  
-  gSize = 20       # group sample size for std.dev calculation
-  deltaA = array.array("l", [0]*gSize)  # store INT32 timing deltas
-  f = 0.1          # low-pass filter constant
 
   machine.freq(MFREQ)
   led1 = Pin(25, Pin.OUT)
@@ -126,7 +119,7 @@ def main():
   #sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
   #sm3.active(1)
 
-  # count time between edges on both Ch.A and Ch.B
+  # count time between edges on Ch.A (and also Ch.B, if that SM active)
   sm4 = StateMachine(4, counter, freq=smf, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
   sm4.irq(counter_handler)
 
@@ -137,10 +130,10 @@ def main():
   aHigh = 0;  aLow = 0
   aHighOld = 0; aLowOld = 0
   
-  rCount = 0  # total number of reading pairs received
-  i = 0  # starting index into data arrays  
+  rCount = 0  # total number of pulses received
+  i = 0  # starting index into circular buffers 
 
-  while True:                 # get the first 4 readings, both high & low
+  while True:          # this just gets the first 4 readings, both high & low
       if (dIdx != i):  # any new data in the buffer?
         if (dataB[i] & 0x01):   # is input A high or low level now?
             aHigh = dataT[i]
@@ -156,8 +149,9 @@ def main():
   sensor_temp = machine.ADC(4)       # Pico internal temperature sensor
   conversion_factor = 3.3 / (65535)  # ADC scaling
 
-  while True:  # all data acquisition is in the interrupt routine
-      if (dIdx != i):  # any new data in the buffer?
+  while True:  # main loop: get data from buffers, print every other full cycle
+      
+      if (dIdx != i):  # if they're different, we aren't caught up with new data
           if (dataB[i] & 0x01):   # is input A at high or low level now?
               aHigh = dataT[i]    # high pulse time duration from buffer
           else:
@@ -165,8 +159,9 @@ def main():
               aLow = dataT[i]         # low pulse time from buffer
               aSum = aHigh + aLow     # total pulse period = high + low durations
               aDiff = aSum - aSumOld  # difference in clock ticks between alternate pulses
-              if (rCount % 2) == 0:                  
-                  led1.toggle()
+              
+              if (rCount % 2) == 0:   # print data every 2nd pulse               
+                  led1.toggle()       # blink LED to indicate something happened
                   secEpoch = time()   # microPython epoch, not Unix epoch
                   reading = sensor_temp.read_u16() * conversion_factor
                   degC = 27 - (reading - 0.706)/0.001721  # RP2040 device internal temperature
