@@ -1,6 +1,6 @@
 # Measure input pulse time, and internal temperature
 # MicroPython for Raspberry Pi Pico (RP2040)
-# J.Beale 13-APR-2021
+# J.Beale 14-APR-2021
 
 """    GP## numbering as per RasPi Pico pinout on p.4 of
 https://datasheets.raspberrypi.org/pico/pico-datasheet.pdf
@@ -13,7 +13,7 @@ import array
 import math   # for sqrt in standard deviation
 
 MFREQ = 200_000_000  # CPU frequency in Hz (typ. 125 MHz; Overclock to 250 MHz)
-VERSION = "Pulse Time v1 13-April-2021 J.Beale"
+VERSION = "Pulse Time v1 14-April-2021 J.Beale"
 
 # -----------------------------------------
 def getBoardID():
@@ -106,29 +106,29 @@ def main():
   led1 = Pin(25, Pin.OUT)
   led1.off()
   
-  vBlink(led1,100,4)  # 4 short, 4 long blinks to indicate program start
-  sleep_ms(500)
-  vBlink(led1,200,4)
-  sleep_ms(4000)  # delay allows starting recording program
+  # vBlink(led1,100,4)  # 4 short, 4 long blinks to indicate program start
+  # sleep_ms(500)
+  # vBlink(led1,200,4)
+  # sleep_ms(4000)  # delay allows starting recording program
   
   # write CSV header line
   print("epoch, ticks, dT, degC")
   ID = getBoardID()
-  print("# %s Board_ID: %s" % (VERSION,ID))
+  print("# %s  Board_ID: %s" % (VERSION,ID))
     
   start = ticks_us()
   start_ms = ticks_ms()
 
   chA = Pin(16,Pin.IN,Pin.PULL_UP)  # encoder A input signal
-  chB = Pin(17,Pin.IN,Pin.PULL_UP)  # encoder B input signal
+  #chB = Pin(17,Pin.IN,Pin.PULL_UP)  # encoder B input signal
   chFlag = Pin(18)  # Flag signal, goes high for 2 cycles when chA or chB edge detected
 
   #smf = int(MFREQ/10)  # was 200M
-  smf = int(MFREQ/1)  # was 200M
+  smf = int(MFREQ)  # state machine clock frequency
   sm2 = StateMachine(2, trigger, freq=smf, in_base=chA, set_base = chFlag)  # watch Ch.A
   sm2.active(1)
-  sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
-  sm3.active(1)
+  #sm3 = StateMachine(3, trigger, freq=smf, in_base=chB, set_base = chFlag)  # watch Ch.B
+  #sm3.active(1)
                    # count time between edges on both Ch.A and Ch.B
   sm4 = StateMachine(4, counter, freq=smf, in_base=chA, jmp_pin = chFlag, sideset_base=Pin(22))
   sm4.irq(counter_handler)
@@ -137,23 +137,13 @@ def main():
 
   flagWidth = 5.0 * 1E-3   # width of interrupter flag, in meters
   countsPerSec = smf / 2   # count rate is 1/2 of state machine frequency
-  # print("Counts per sec = %d" % countsPerSec)
+
   aHigh = 0;  aLow = 0
   aHighOld = 0; aLowOld = 0
   skip = False       # True to skip one half-swing to align drive phase
-  # durStart = 21000   # initial microseconds duration of drive pulse
-  durStart = 15_000   # initial microseconds duration of drive pulse
-  durMax =  250_000    # maximum allowed drive period
-  v1Setpoint = 0.025 # target velocity (m/s)
-  intTerm = 0        # integral term correction of drive output
-  kp = 4E7           # proportional control constant (was kp,ki: 2E7,5E4)
-  ki = 5E4           # integral control constant
-  
   
   rCount = 0  # total number of reading pairs received
-  i = 0  # starting index into data arrays
-  j = 0  # index into deltaA[]
-
+  i = 0  # starting index into data arrays  
 
   while True:                 # get the first 4 readings, both high & low
       if (dIdx != i):  # any new data in the buffer?
@@ -186,7 +176,7 @@ def main():
                   secEpoch = time()
                   reading = sensor_temp.read_u16() * conversion_factor
                   degC = 27 - (reading - 0.706)/0.001721
-                  print("%d,%8d,%3d,%5.2f" % (secEpoch,aSum,aDiff,degC))
+                  print("%d,%8d,%2d,%5.2f" % (secEpoch,aSum,aDiff,degC))
               aHighOld = aHigh
               aLowOld = aLow
               aSumOld = aSum
