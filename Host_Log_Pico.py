@@ -15,6 +15,7 @@ from datetime import datetime  # for Y-M-D H:M:S time format
 import time                    # for seconds since epoch
 
 logFileName = "/home/pi/Documents/pico/pLog.csv"
+fRate = 5      # input lines before we flush the file to disk
 
 picoDev = [] # haven't found any serial port Pico devices yet
 
@@ -28,10 +29,12 @@ while True:
   time.sleep(1)  # wait and try again, until board is connected
 
 
-print("Writing output to %s" % logFileName)
 ser = []
 for pd in picoDev:        
-  ser.append( serial.Serial(port='/dev/'+pd) )
+    print("Found pico device: %s" % pd)
+    ser.append( serial.Serial(port='/dev/'+pd) )
+
+print("Writing output to %s" % logFileName)
   
 # use the first Pico board detected, if there was more than one  
 pName = picoDev[0]  # port name of Pico sending data
@@ -45,7 +48,7 @@ with open(logFileName,'a') as f:
     inLine = ser[0].readline().rstrip().decode('utf-8')
     lCount += 1
     f.write("%s, %d, %s\n" % (tNow,absSec,inLine)) 
-    if (lCount % 10 == 0):
+    if (lCount % fRate == 0):
       f.flush()
     print("%d, %s" % (absSec, inLine))    
   
