@@ -24,9 +24,9 @@ while True:
     if (port.vid == 0x2e8a) and (port.pid == 0x0005): # Pico Serial        
         picoDev.append(port.name)
 
-  if len(picoDev) != 0:  # quit as soon as we find one
+  if len(picoDev) != 0:  # quit if there is at least one
     break
-  time.sleep(1)  # wait and try again, until board is connected
+  time.sleep(1)  # wait and try again, until a pico is connected
 
 
 ser = []
