@@ -29,16 +29,13 @@ while True:
   time.sleep(1)  # wait and try again, until a pico is connected
 
 
-ser = []
+ser = []  # will contain serial device for each pico found
 for pd in picoDev:        
     print("Found pico device: %s" % pd)
     ser.append( serial.Serial(port='/dev/'+pd) )
 
 print("Writing output to %s" % logFileName)
-  
-# use the first Pico board detected, if there was more than one  
-pName = picoDev[0]  # port name of Pico sending data
-  
+   
 with open(logFileName,'a') as f:
   lCount = 0   # count of lines received on serial port
   
