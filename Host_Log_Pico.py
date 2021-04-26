@@ -16,7 +16,6 @@ import time                    # for seconds since epoch
 
 logFileName = "/home/pi/Documents/pico/pLog.csv"
 
-oName = "Pico Log v0.1"
 picoDev = [] # haven't found any serial port Pico devices yet
 
 while True:
@@ -24,7 +23,7 @@ while True:
     if (port.vid == 0x2e8a) and (port.pid == 0x0005): # Pico Serial        
         picoDev.append(port.name)
 
-  if len(picoDev) != 0:
+  if len(picoDev) != 0:  # quit as soon as we find one
     break
   time.sleep(1)  # wait and try again, until board is connected
 
