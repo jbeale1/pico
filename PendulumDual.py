@@ -91,6 +91,9 @@ ASIZE = 1023                         # size of circular data buffers (dataT, dat
 dataT = array.array("I", [0]*ASIZE)  # store UINT32 timing data
 dataB = array.array("B", [0]*ASIZE)  # store UCHAR bits (Ch.A, Ch.B values)
 dIdx = 0                         # curent index into DATA array
+bufT = array.array("I", [0]*4)      # last 4 values of timer data
+bufC = array.array("I", [0]*4)      # count of last four sets (full-swing groups)
+
 
 def counter_handler(sm):
     global dIdx
@@ -129,7 +132,7 @@ def main():
   now = localtime(tStart)
   dt_string = ("%d-%02d-%02d %02d:%02d:%02d" % now[0:6])  
     
-  print("t00,t10,t20,t11,sum")
+  print("t00,t10,t20,t11,diff,sum")
   print("# Start: %s  %s" % (dt_string,VERSION))
     
   posEnc= 0
@@ -167,12 +170,14 @@ def main():
   intTerm = 0        # integral term correction of drive output
   kp = 4E7           # proportional control constant (was kp,ki: 2E7,5E4)
   ki = 5E4           # integral control constant
-  
+  f = 0.1            # low-pass filter constant
   
   rCount = 0  # total number of reading pairs received
   i = 0  # starting index into data arrays
   j = 0  # index into deltaA[]
+  k = 0  # index into bufC[]
   aSum = 0  # how many counts in a full swing
+  dcF = 0   # low-pass filtered difference
 
   #sys.exit()  # DEBUG
   # driveStart()  # get pendulum swinging enough to read position output
@@ -206,17 +211,38 @@ def main():
           #print("{0:02b}".format(flag),end=", ")
           tval = dataT[i]
           aSum += tval
+          bufT[eCount%4] = tval
           eCount += 1
-          print("%d" % tval,end=", ")  # timer value
+          #print("%d" % tval,end=", ")  # timer value
           if (flag == 0x01):
-            print("%d" % aSum)  # total counts this pendulum cycle
-            if eCount != 4:
+            diffCnt = bufT[1]-bufT[3]
+            dcF = (1.0-f)*dcF + f*diffCnt
+            bufC[k] = eCount
+            k += 1
+            if (k > 3):
+                k = 0
+                
+            # only print out data when we've had 4 sets each with exactly 4 values
+            # so we don't print when swing is too high, with extra edges from overshoot
+            if (bufC[0]==4) and (bufC[1]==4) and (bufC[2]==4) and (bufC[3]==4):
+              #print("bT3:%d, %d, %d" % (bufT[3],diffCnt,aSum)) # difference, total counts
+              elapsed_ms = ticks_diff(ticks_ms(),start_ms)
+              print("%d,%d,%d,%d,%d"%(elapsed_ms,bufT[0],bufT[1],bufT[2],bufT[3]),end=",")
+              print(" %d, %d" % (dcF,aSum)) # difference, total counts
+              #print("%d" % aSum)  # total counts this pendulum cycle
+            else:
+              start_ms = ticks_ms()  # reset start time for next cycle
+
+
+            """
+            if eCount != 4:   # abnormal count: amplitude has decayed too far; end run
                 tEnd = time() # assumes host PC has updated it
                 now = localtime(tEnd)
                 tDur = (tEnd - tStart)
                 dt_string = ("%d-%02d-%02d %02d:%02d:%02d" % now[0:6])  
                 print("# End: %s  Duration: %d" % (dt_string, tDur))
                 sys.exit()
+            """
             aSum = 0
             eCount = 0
           """
