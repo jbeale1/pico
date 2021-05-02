@@ -132,7 +132,7 @@ def main():
   now = localtime(tStart)
   dt_string = ("%d-%02d-%02d %02d:%02d:%02d" % now[0:6])  
     
-  print("t00,t10,t20,t11,diff,sum")
+  print("msec,t00,t10,t20,t11,diff,sum")
   print("# Start: %s  %s" % (dt_string,VERSION))
     
   posEnc= 0
